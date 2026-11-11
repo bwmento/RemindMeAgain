@@ -2,7 +2,9 @@ import { useState } from 'react'
 
 const RSVP_OPTIONS = ['Attending', 'Maybe', 'Not attending']
 
-export default function EventDetail({ event, onClose }) {
+
+export default function EventDetail({ event, onClose, onEdit, onDelete }) {
+
   const [rsvp, setRsvp] = useState(event.rsvp || 'Attending')
 
   if (!event) return null
@@ -17,6 +19,27 @@ export default function EventDetail({ event, onClose }) {
         <button type="button" className="btn btn-outline" onClick={onClose}>
           Close
         </button>
+        
+<button
+  type="button"
+  className="btn btn-primary"
+  onClick={() => onEdit?.(event)}
+>
+  Edit Event
+</button>
+
+<button
+  type="button"
+  className="btn btn-outline"
+  onClick={() => {
+    if (window.confirm('Are you sure you want to delete this event?')) {
+      onDelete?.(event.id)
+    }
+  }}
+>
+  Delete Event
+</button>
+
       </header>
       <p>
         <strong>

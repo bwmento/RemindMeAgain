@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import AppShell from '../components/AppShell.jsx'
 import EventDetail from '../components/EventDetail.jsx'
 import EventForm from '../components/EventForm.jsx'
@@ -21,21 +21,95 @@ export default function CalendarPage() {
   const [category, setCategory] = useState('All')
   const [openForm, setOpenForm] = useState(false)
   const [pickedDay, setPickedDay] = useState(15)
+
+
+  const [editingEvent, setEditingEvent] = useState(null)
+
   const [selected, setSelected] = useState(EVENTS[3])
+
+  const [events, setEvents] = useState(() => {
+    try {
+      const savedEvents = localStorage.getItem('remindmeagain-events')
+      return savedEvents ? JSON.parse(savedEvents) : EVENTS
+    } catch (error) {
+      console.error('Could not load saved events:', error)
+      return EVENTS
+    }
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('remindmeagain-events', JSON.stringify(events))
+    } catch (error) {
+      console.error('Could not save events:', error)
+    }
+  }, [events])
 
   const visibleEvents = useMemo(
     () =>
-      EVENTS.filter((event) => (scope === 'all' || event.scope === scope) && (category === 'All' || event.category === category)),
-    [scope, category],
+      events.filter((event) => (scope === 'all' || event.scope === scope) && (category === 'All' || event.category === category)),
+    [scope, category, events],
   )
 
   const cells = useMemo(() => octoberCells(visibleEvents), [visibleEvents])
   const dayEvents = visibleEvents.filter((event) => event.day === pickedDay)
 
+function handleSaveEvent(newEvent) {
+  if (editingEvent) {
+    const updatedEvent = {
+      ...editingEvent,
+      ...newEvent,
+      id: editingEvent.id,
+      day: Number(newEvent.startDate.split('-')[2]),
+      time: newEvent.startTime,
+    }
+
+    setEvents(previousEvents =>
+      previousEvents.map(event =>
+        event.id === editingEvent.id ? updatedEvent : event
+      )
+    )
+  } else {
+    const savedEvent = {
+      ...newEvent,
+      id: Date.now(),
+      day: Number(newEvent.startDate.split('-')[2]),
+      time: newEvent.startTime,
+      scope: 'mine',
+      category: 'Personal',
+      chip: 'chip-personal',
+    }
+
+    setEvents(previousEvents => [...previousEvents, savedEvent])
+  }
+
+  setEditingEvent(null)
+  setSelected(null)
+}
+
+function handleDeleteEvent(eventId) {
+  setEvents(previousEvents =>
+    previousEvents.filter(event => event.id !== eventId)
+  )
+
+  setSelected(null)
+}
+
+
   const rail = (
     <aside className="rail">
       {selected ? (
-        <EventDetail event={selected} onClose={() => setSelected(null)} />
+<EventDetail
+  event={selected}
+  onClose={() => setSelected(null)}
+  onDelete={handleDeleteEvent}
+  onEdit={(event) => {
+    setEditingEvent(event)
+    setSelected(null)
+    setOpenForm(true)
+  }}
+/>
+
       ) : (
         <>
           <h2 className="rail-title">Oct {pickedDay}</h2>
@@ -131,8 +205,20 @@ export default function CalendarPage() {
             }}
           />
         </div>
-      </main>
-      {openForm && <EventForm pickedDay={pickedDay} onClose={() => setOpenForm(false)} />}
+      </main> 
+{openForm && (
+  <EventForm
+    key={editingEvent?.id ?? 'new-event'}
+    pickedDay={pickedDay}
+    editingEvent={editingEvent}
+    onClose={() => {
+      setOpenForm(false)
+      setEditingEvent(null)
+    }}
+    onSave={handleSaveEvent}
+  />
+)}
+
     </AppShell>
   )
 }
