@@ -1,168 +1,189 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSession } from '../auth.jsx'
 import AppShell from '../components/AppShell.jsx'
 import EventDetail from '../components/EventDetail.jsx'
 import EventForm from '../components/EventForm.jsx'
 import MonthGrid from '../components/MonthGrid.jsx'
-import { EVENTS, PENDING_INVITES, REMINDERS, octoberCells } from '../data.js'
-
-/* Handles the filter state and the general state of the signed-in session when it comes to the calendar itself */
+import { api } from '../lib/api.js'
+import { buildMonthCells, dateKey, eventOccursOn, formatDateTime, formatDayLabel, formatMonthLabel, parseDateTime } from '../lib/dates.js'
 
 const SCOPES = [
   { id: 'all', label: 'All' },
   { id: 'mine', label: 'Mine' },
   { id: 'shared', label: 'Shared' },
-  { id: 'imported', label: 'Imported' },
 ]
 
-const CATEGORIES = ['All', 'Personal', 'Work', 'Travel', 'School']
-
 export default function CalendarPage() {
+  const { getToken } = useSession()
+  const getTokenRef = useRef(getToken)
+  getTokenRef.current = getToken
+  const today = new Date()
+  const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() })
   const [scope, setScope] = useState('all')
-  const [category, setCategory] = useState('All')
   const [openForm, setOpenForm] = useState(false)
-  const [pickedDay, setPickedDay] = useState(15)
-
-
+  const [pickedDay, setPickedDay] = useState(dateKey(today))
   const [editingEvent, setEditingEvent] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
+  const [user, setUser] = useState(null)
+  const [events, setEvents] = useState([])
+  const [reminders, setReminders] = useState([])
+  const [invitations, setInvitations] = useState([])
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
 
-  const [selected, setSelected] = useState(EVENTS[3])
-
-  const [events, setEvents] = useState(() => {
-    try {
-      const savedEvents = localStorage.getItem('remindmeagain-events')
-      return savedEvents ? JSON.parse(savedEvents) : EVENTS
-    } catch (error) {
-      console.error('Could not load saved events:', error)
-      return EVENTS
-    }
-  })
+  const load = useCallback(async () => {
+    const token = await getTokenRef.current()
+    const [eventData, reminderData, invitationData] = await Promise.all([
+      api('/api/events', { token }),
+      api('/api/reminders', { token }),
+      api('/api/invitations', { token }),
+    ])
+    setUser(eventData.user)
+    setEvents(eventData.events)
+    setReminders(reminderData.reminders)
+    setInvitations(invitationData.invitations.filter((item) => item.status === 'pending'))
+    setError('')
+  }, [])
 
   useEffect(() => {
-    try {
-      localStorage.setItem('remindmeagain-events', JSON.stringify(events))
-    } catch (error) {
-      console.error('Could not save events:', error)
-    }
-  }, [events])
+    load().catch((loadError) => setError(loadError.message))
+  }, [load])
 
-  const visibleEvents = useMemo(
-    () =>
-      events.filter((event) => (scope === 'all' || event.scope === scope) && (category === 'All' || event.category === category)),
-    [scope, category, events],
+  const visibleEvents = useMemo(() => {
+    if (!user) return events
+    return events.filter((event) => {
+      if (scope === 'mine') return event.owner_id === user.user_id
+      if (scope === 'shared') return event.owner_id !== user.user_id || event.invitations.length > 0
+      return true
+    })
+  }, [events, scope, user])
+
+  const cells = useMemo(
+    () => buildMonthCells(cursor.year, cursor.month, visibleEvents),
+    [cursor.month, cursor.year, visibleEvents],
   )
+  const monthLabel = formatMonthLabel(cursor.year, cursor.month)
+  const pickedDate = parseDateTime(`${pickedDay} 00:00:00`)
+  const dayEvents = visibleEvents.filter((event) => eventOccursOn(event, pickedDate))
+  const selected = events.find((event) => event.event_id === selectedId) || null
 
-  const cells = useMemo(() => octoberCells(visibleEvents), [visibleEvents])
-  const dayEvents = visibleEvents.filter((event) => event.day === pickedDay)
-
-function handleSaveEvent(newEvent) {
-  if (editingEvent) {
-    const updatedEvent = {
-      ...editingEvent,
-      ...newEvent,
-      id: editingEvent.id,
-      day: Number(newEvent.startDate.split('-')[2]),
-      time: newEvent.startTime,
-    }
-
-    setEvents(previousEvents =>
-      previousEvents.map(event =>
-        event.id === editingEvent.id ? updatedEvent : event
-      )
-    )
-  } else {
-    const savedEvent = {
-      ...newEvent,
-      id: Date.now(),
-      day: Number(newEvent.startDate.split('-')[2]),
-      time: newEvent.startTime,
-      scope: 'mine',
-      category: 'Personal',
-      chip: 'chip-personal',
-    }
-
-    setEvents(previousEvents => [...previousEvents, savedEvent])
+  function shiftMonth(amount) {
+    const next = new Date(cursor.year, cursor.month + amount, 1)
+    setCursor({ year: next.getFullYear(), month: next.getMonth() })
+    setPickedDay(dateKey(next))
+    setSelectedId(null)
   }
 
-  setEditingEvent(null)
-  setSelected(null)
-}
+  async function handleSaveEvent(payload) {
+    const token = await getToken()
+    const path = editingEvent ? `/api/events/${editingEvent.event_id}` : '/api/events'
+    const result = await api(path, { token, method: editingEvent ? 'PUT' : 'POST', body: payload })
+    if (result.unknown_emails?.length) {
+      setNotice(`Saved. No account found for ${result.unknown_emails.join(', ')}.`)
+    } else {
+      setNotice('')
+    }
+    setEditingEvent(null)
+    setSelectedId(null)
+    await load()
+  }
 
-function handleDeleteEvent(eventId) {
-  setEvents(previousEvents =>
-    previousEvents.filter(event => event.id !== eventId)
-  )
+  async function handleDeleteEvent(eventId) {
+    const token = await getToken()
+    await api(`/api/events/${eventId}`, { token, method: 'DELETE' })
+    setSelectedId(null)
+    await load()
+  }
 
-  setSelected(null)
-}
-
+  async function handleRsvp(eventId, status) {
+    const token = await getToken()
+    await api(`/api/events/${eventId}/rsvp`, { token, method: 'PUT', body: { status } })
+    await load()
+  }
 
   const rail = (
     <aside className="rail">
       {selected ? (
-<EventDetail
-  event={selected}
-  onClose={() => setSelected(null)}
-  onDelete={handleDeleteEvent}
-  onEdit={(event) => {
-    setEditingEvent(event)
-    setSelected(null)
-    setOpenForm(true)
-  }}
-/>
-
+        <EventDetail
+          event={selected}
+          currentUserId={user?.user_id}
+          onClose={() => setSelectedId(null)}
+          onDelete={handleDeleteEvent}
+          onRsvp={handleRsvp}
+          onEdit={(event) => {
+            setEditingEvent(event)
+            setSelectedId(null)
+            setOpenForm(true)
+          }}
+        />
       ) : (
         <>
-          <h2 className="rail-title">Oct {pickedDay}</h2>
+          <h2 className="rail-title">{formatDayLabel(pickedDay)}</h2>
           {dayEvents.length === 0 ? (
-            <div className="empty">Nothing on this day. Create an event or import one.</div>
+            <div className="empty">Nothing on this day.</div>
           ) : (
             dayEvents.map((item) => (
-              <button key={item.id} type="button" className="reminder clickable" onClick={() => setSelected(item)}>
-                <time>{item.time}</time>
+              <button key={item.event_id} type="button" className="reminder clickable" onClick={() => setSelectedId(item.event_id)}>
+                <time>{formatDateTime(item.start_time)}</time>
                 <strong>{item.title}</strong>
-                <span className="fine tight">
-                  {item.scope === 'shared' ? `RSVP · ${item.rsvp}` : item.category}
-                </span>
+                <span className="fine tight">{item.location || item.owner_name}</span>
               </button>
             ))
           )}
         </>
       )}
-      <h2 className="rail-title spaced">
-        Reminders
-      </h2>
-      {REMINDERS.map((item) => (
-        <article key={item.id} className="reminder">
-          <time>{item.when}</time>
-          <strong>{item.title}</strong>
-          <span className="fine tight">
-            {item.detail}
-          </span>
-        </article>
-      ))}
-      <h2 className="rail-title spaced">
-        Pending invites
-      </h2>
-      {PENDING_INVITES.map((item) => (
-        <article key={item.id} className="reminder">
-          <time>{item.when}</time>
-          <strong>{item.title}</strong>
-          <span className="fine tight">
-            From {item.from}
-          </span>
-        </article>
-      ))}
+      <h2 className="rail-title spaced">Reminders</h2>
+      {reminders.length === 0 ? (
+        <div className="empty">No reminders yet.</div>
+      ) : (
+        reminders.map((item) => (
+          <article key={item.reminder_id} className="reminder">
+            <time>{formatDateTime(item.reminder_time)}</time>
+            <strong>{item.title}</strong>
+            <span className="fine tight">
+              {item.reminder_type} · {item.status}
+            </span>
+          </article>
+        ))
+      )}
+      <h2 className="rail-title spaced">Pending invites</h2>
+      {invitations.length === 0 ? (
+        <div className="empty">No pending invitations.</div>
+      ) : (
+        invitations.map((item) => (
+          <article key={item.invitation_id} className="reminder">
+            <time>{formatDateTime(item.start_time)}</time>
+            <strong>{item.title}</strong>
+            <span className="fine tight">From {item.owner_name}</span>
+          </article>
+        ))
+      )}
     </aside>
   )
 
   return (
     <AppShell rail={rail}>
       <main className="main-cal">
+        {error && <p className="banner">{error}</p>}
+        {notice && <p className="banner">{notice}</p>}
         <div className="month-head">
-          <div>
-            <h1>October 2026</h1>
+          <div className="month-nav">
+            <button type="button" className="btn btn-outline" onClick={() => shiftMonth(-1)} aria-label="Previous month">
+              ←
+            </button>
+            <h1>{monthLabel}</h1>
+            <button type="button" className="btn btn-outline" onClick={() => shiftMonth(1)} aria-label="Next month">
+              →
+            </button>
           </div>
-          <button type="button" className="btn btn-accent" onClick={() => setOpenForm(true)}>
+          <button
+            type="button"
+            className="btn btn-accent"
+            onClick={() => {
+              setEditingEvent(null)
+              setOpenForm(true)
+            }}
+          >
             New event
           </button>
         </div>
@@ -178,47 +199,35 @@ function handleDeleteEvent(eventId) {
             </button>
           ))}
         </div>
-        <div className="filters" aria-label="Category">
-          {CATEGORIES.map((name) => (
-            <button
-              key={name}
-              type="button"
-              className={`filter ${category === name ? 'on' : ''}`}
-              onClick={() => setCategory(name)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
         <div className="preview">
           <MonthGrid
             cells={cells}
+            label={monthLabel}
             interactive
             selectedDay={pickedDay}
             onSelectDay={(day) => {
               setPickedDay(day)
-              setSelected(null)
+              setSelectedId(null)
             }}
             onSelectEvent={(event) => {
-              setPickedDay(event.day)
-              setSelected(event)
+              setPickedDay(dateKey(parseDateTime(event.start_time)))
+              setSelectedId(event.event_id)
             }}
           />
         </div>
-      </main> 
-{openForm && (
-  <EventForm
-    key={editingEvent?.id ?? 'new-event'}
-    pickedDay={pickedDay}
-    editingEvent={editingEvent}
-    onClose={() => {
-      setOpenForm(false)
-      setEditingEvent(null)
-    }}
-    onSave={handleSaveEvent}
-  />
-)}
-
+      </main>
+      {openForm && (
+        <EventForm
+          key={editingEvent?.event_id ?? 'new-event'}
+          pickedDay={pickedDay}
+          editingEvent={editingEvent}
+          onClose={() => {
+            setOpenForm(false)
+            setEditingEvent(null)
+          }}
+          onSave={handleSaveEvent}
+        />
+      )}
     </AppShell>
   )
 }

@@ -261,6 +261,8 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
+  background: #f3d5c6;
+  color: var(--rust-deep);
 }
 
 .chip-work {
@@ -437,6 +439,27 @@ h1 {
 .month-head h1 {
   font-size: 2rem;
   margin: 0;
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.month-nav h1 {
+  min-width: 220px;
+  text-align: center;
+}
+
+.auth-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+.auth-setup {
+  max-width: 460px;
 }
 
 .filters {

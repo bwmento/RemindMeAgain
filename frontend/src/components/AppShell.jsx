@@ -1,6 +1,12 @@
+import { UserButton } from '@clerk/react'
 import { Link, NavLink } from 'react-router-dom'
+import { clerkKey, useSession } from '../auth.jsx'
 
 export default function AppShell({ children, rail }) {
+  const { user } = useSession()
+  const email = user?.primaryEmailAddress?.emailAddress || ''
+  const name = user?.fullName || user?.username || email || 'Signed in'
+
   return (
     <div className={`app-shell ${rail ? '' : 'app-shell-wide'}`}>
       <aside className="side">
@@ -20,8 +26,9 @@ export default function AppShell({ children, rail }) {
           </NavLink>
         </nav>
         <div className="side-user">
-          <strong>Sarah Miller</strong>
-          <span>sarah.miller@email.com</span>
+          <strong>{name}</strong>
+          <span>{email}</span>
+          {clerkKey && <UserButton />}
         </div>
       </aside>
       {children}

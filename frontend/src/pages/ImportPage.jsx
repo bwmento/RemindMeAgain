@@ -1,23 +1,68 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSession } from '../auth.jsx'
 import AppShell from '../components/AppShell.jsx'
-import { COMMUNITY_CALENDARS, SAMPLE_IMPORTS } from '../data.js'
+import { api } from '../lib/api.js'
+
+const COLUMNS = ['title', 'start_time', 'end_time', 'description', 'location', 'recurrence_rule']
+
+function parseCsv(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (lines.length < 2) return []
+
+  const headers = lines[0].split(',').map((header) => header.trim().toLowerCase())
+  return lines.slice(1).map((line, index) => {
+    const cells = line.split(',').map((cell) => cell.trim())
+    const row = { id: index + 1, included: true }
+    headers.forEach((header, cellIndex) => {
+      if (COLUMNS.includes(header)) row[header] = cells[cellIndex] || ''
+    })
+    return row
+  })
+}
 
 export default function ImportPage() {
-  const [rows, setRows] = useState(SAMPLE_IMPORTS)
+  const { getToken } = useSession()
+  const [rows, setRows] = useState([])
   const [fileLabel, setFileLabel] = useState('No file chosen')
-  const [paste, setPaste] = useState('Family dinner\nSunday 6:30pm\nMom’s house')
-  const [connected, setConnected] = useState('school')
   const [notice, setNotice] = useState('')
-
-  const includedCount = rows.filter((row) => row.included).length
+  const [saving, setSaving] = useState(false)
+  const included = rows.filter((row) => row.included)
 
   function toggleRow(id) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, included: !row.included } : row)))
   }
 
-  function loadPreview() {
-    setNotice('Preview updated. Review the rows below, then add them to your calendar.')
+  async function addSelected() {
+    setSaving(true)
+    setNotice('')
+    try {
+      const token = await getToken()
+      for (const row of included) {
+        await api('/api/events', {
+          token,
+          method: 'POST',
+          body: {
+            title: row.title,
+            description: row.description || null,
+            location: row.location || null,
+            start_time: row.start_time,
+            end_time: row.end_time,
+            recurrence_rule: row.recurrence_rule || null,
+            invite_emails: [],
+          },
+        })
+      }
+      setNotice(`Added ${included.length} events.`)
+      setRows([])
+    } catch (error) {
+      setNotice(error.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -28,120 +73,73 @@ export default function ImportPage() {
             <p className="kicker">Bring dates in</p>
             <h1>Import events</h1>
             <p className="lede tight">
-              Pull dates out of a calendar file, notes, or a community calendar instead of typing each one.
-              Imported events stay private until you share them.
+              Upload a CSV with title, start_time, end_time, and optional description, location, and recurrence_rule.
             </p>
           </div>
         </header>
 
-        <div className="import-grid">
-          <section className="card">
-            <h2>1. Upload a file</h2>
-            <p>Upload an .ics or .csv file from another calendar.</p>
-            <label className="dropzone">
-              <input
-                type="file"
-                accept=".ics,.csv,.txt"
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  setFileLabel(file ? file.name : 'No file chosen')
-                  loadPreview()
-                }}
-              />
-              <strong>Drop a file or browse</strong>
-              <span>{fileLabel}</span>
-            </label>
-          </section>
-
-          <section className="card">
-            <h2>2. Paste from notes</h2>
-            <p>Chat logs, flyers, anything messy. Stored as plain text you own.</p>
-            <textarea rows="6" value={paste} onChange={(event) => setPaste(event.target.value)} />
-            <button type="button" className="btn btn-outline" onClick={loadPreview}>
-              Preview paste
-            </button>
-          </section>
-
-          <section className="card">
-            <h2>3. Community calendar</h2>
-            <p>Add a school or group calendar next to your personal events.</p>
-            <ul className="community-list">
-              {COMMUNITY_CALENDARS.map((item) => (
-                <li key={item.id}>
-                  <label className="check">
-                    <input
-                      type="radio"
-                      name="community"
-                      checked={connected === item.id}
-                      onChange={() => {
-                        setConnected(item.id)
-                        loadPreview()
-                      }}
-                    />
-                    <span>
-                      <strong>{item.name}</strong>
-                      <em>{item.detail}</em>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
+        <section className="card">
+          <h2>Upload a CSV</h2>
+          <p>Times use YYYY-MM-DD HH:MM:SS. Recurrence is blank, FREQ=WEEKLY, or FREQ=MONTHLY.</p>
+          <label className="dropzone">
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={async (event) => {
+                const file = event.target.files?.[0]
+                setFileLabel(file ? file.name : 'No file chosen')
+                if (!file) return
+                const text = await file.text()
+                const parsed = parseCsv(text).filter((row) => row.title && row.start_time && row.end_time)
+                setRows(parsed)
+                setNotice(parsed.length ? 'Review the rows, then add them.' : 'No rows with title, start_time, and end_time.')
+              }}
+            />
+            <strong>Drop a CSV or browse</strong>
+            <span>{fileLabel}</span>
+          </label>
+        </section>
 
         {notice && <p className="banner">{notice}</p>}
 
         <section className="preview table-wrap">
           <div className="preview-bar">
-            <strong>Preview · {includedCount} selected</strong>
-            <span className="fine tight">
-              Visibility defaults to Private
-            </span>
+            <strong>Preview · {included.length} selected</strong>
           </div>
-          <table className="import-table">
-            <thead>
-              <tr>
-                <th>Add</th>
-                <th>Title</th>
-                <th>Start</th>
-                <th>End</th>
-                <th>Location</th>
-                <th>Source</th>
-                <th>Visibility</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className={row.included ? '' : 'dim'}>
-                  <td>
-                    <input type="checkbox" checked={row.included} onChange={() => toggleRow(row.id)} />
-                  </td>
-                  <td>{row.title}</td>
-                  <td>{row.start}</td>
-                  <td>{row.end}</td>
-                  <td>{row.location}</td>
-                  <td>{row.source}</td>
-                  <td>
-                    <select defaultValue={row.visibility} aria-label={`Visibility for ${row.title}`}>
-                      <option>Private</option>
-                      <option>Shared later</option>
-                    </select>
-                  </td>
+          {rows.length === 0 ? (
+            <div className="empty">No rows yet.</div>
+          ) : (
+            <table className="import-table">
+              <thead>
+                <tr>
+                  <th>Add</th>
+                  <th>Title</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Location</th>
+                  <th>Description</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id} className={row.included ? '' : 'dim'}>
+                    <td>
+                      <input type="checkbox" checked={row.included} onChange={() => toggleRow(row.id)} />
+                    </td>
+                    <td>{row.title}</td>
+                    <td>{row.start_time}</td>
+                    <td>{row.end_time}</td>
+                    <td>{row.location}</td>
+                    <td>{row.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           <div className="import-actions">
-            <p className="fine tight">
-              You own every imported event. Titles and notes stay on your calendar.
-            </p>
             <div className="hero-actions">
-              <button
-                type="button"
-                className="btn btn-accent"
-                onClick={() => setNotice(`Added ${includedCount} events to your calendar.`)}
-              >
-                Add {includedCount} to my calendar
+              <button type="button" className="btn btn-accent" disabled={included.length === 0 || saving} onClick={addSelected}>
+                Add {included.length} to my calendar
               </button>
               <Link className="btn btn-outline" to="/calendar">
                 Back to calendar

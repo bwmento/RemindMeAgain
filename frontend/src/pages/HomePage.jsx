@@ -1,9 +1,14 @@
 import { Link } from 'react-router-dom'
 import MonthGrid from '../components/MonthGrid.jsx'
 import SiteHeader from '../components/SiteHeader.jsx'
-import { octoberCells } from '../data.js'
+import { buildMonthCells, formatMonthLabel } from '../lib/dates.js'
 
 export default function HomePage() {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const label = formatMonthLabel(year, month)
+
   return (
     <div className="page">
       <SiteHeader />
@@ -14,11 +19,10 @@ export default function HomePage() {
           <h1>Plan it, share it, get reminded before it starts.</h1>
           <p className="lede">
             One calendar for your own dates and the events you throw with friends or family. Create an event, invite
-            people, collect RSVPs and time polls, and import the rest so you are not retyping flyers and school
-            calendars.
+            people, collect RSVPs, and import the rest so you are not retyping flyers and school calendars.
           </p>
           <div className="hero-actions">
-            <Link className="btn btn-accent" to="/calendar">
+            <Link className="btn btn-accent" to="/sign-up">
               Create a free account
             </Link>
             <Link className="btn btn-outline" to="/calendar">
@@ -28,17 +32,14 @@ export default function HomePage() {
               Import events
             </Link>
           </div>
-          <p className="fine">Sign in with any email. Imported events stay private until you share them.</p>
+          <p className="fine">Sign in with Clerk. Events stay on your account.</p>
         </div>
 
-        <aside className="preview" aria-label="Sample October calendar">
+        <aside className="preview" aria-label={label}>
           <div className="preview-bar">
-            <strong>October 2026</strong>
-            <span className="fine tight">
-              Mine · shared · imported
-            </span>
+            <strong>{label}</strong>
           </div>
-          <MonthGrid cells={octoberCells()} />
+          <MonthGrid cells={buildMonthCells(year, month, [])} label={label} />
         </aside>
       </section>
 
@@ -49,17 +50,17 @@ export default function HomePage() {
           <article className="card">
             <div className="step-num">1</div>
             <h3>Fill your calendar</h3>
-            <p>Add personal events or import a file / community feed. Filter by mine, shared, or imported.</p>
+            <p>Add events or import a CSV. Your month starts empty until you do.</p>
           </article>
           <article className="card">
             <div className="step-num">2</div>
             <h3>Invite and RSVP</h3>
-            <p>Send invites, collect attending / maybe / not, and run a time poll when the date is not settled.</p>
+            <p>Invite people who already have accounts, then collect attending, maybe, or declined.</p>
           </article>
           <article className="card">
             <div className="step-num">3</div>
             <h3>Get reminded</h3>
-            <p>Attach a reminder to any event and get an email or in-app ping before it starts.</p>
+            <p>Attach an in-app or email reminder to any event you create.</p>
           </article>
         </div>
       </section>

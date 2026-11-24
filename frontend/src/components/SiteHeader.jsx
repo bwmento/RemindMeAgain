@@ -1,6 +1,10 @@
+import { UserButton } from '@clerk/react'
 import { Link } from 'react-router-dom'
+import { clerkKey, useSession } from '../auth.jsx'
 
 export default function SiteHeader() {
+  const { signedIn } = useSession()
+
   return (
     <header className="nav">
       <Link to="/" className="wordmark">
@@ -14,12 +18,13 @@ export default function SiteHeader() {
         <Link className="btn btn-ghost" to="/import">
           Import
         </Link>
-        <Link className="btn btn-outline" to="/calendar">
-          Open app
-        </Link>
-        <Link className="btn btn-primary" to="/calendar">
-          Sign in
-        </Link>
+        {signedIn ? (
+          clerkKey ? <UserButton /> : null
+        ) : (
+          <Link className="btn btn-primary" to="/sign-in">
+            Sign in
+          </Link>
+        )}
       </nav>
     </header>
   )
